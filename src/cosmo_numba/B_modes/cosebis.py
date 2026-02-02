@@ -538,7 +538,9 @@ def compute_roots_norms(Nmax, tmin, tmax, precision=80):
         # Eq. 28
         tt = sym.summation(c[n - 1, i] * z ** (i), (i, 0, n + 1))
 
-        roots = sym.nroots(tt, n=precision)
+        # Increase maxsteps from default 50 to 200 to improve convergence
+        # for high-order polynomials (modes 10+)
+        roots = sym.nroots(tt, n=precision, maxsteps=200)
 
         r = sym.Array([sym.N(sym.re(roots[j]), 50) for j in range(0, n + 1)])
         # Eq. 36 (without normalization)
