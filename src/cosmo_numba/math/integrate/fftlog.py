@@ -245,9 +245,12 @@ def fht(N, k, pk, dim, mu, q_, kcrc, noring):
     prefac_xi = one_over_2pi_dhalf * np.power(r, -dim / 2 - q)
 
     a = np.asarray(prefac_pk * pk + 0.0 * 1j, dtype=np.complex128)
-    b = np.fft.fft(a)
+    # Use objmode for FFT calls - numba doesn't support np.fft with numpy 2.x
+    with nb.objmode(b="complex128[:]"):
+        b = np.fft.fft(a)
     b *= u
-    b = np.fft.ifft(b)
+    with nb.objmode(b="complex128[:]"):
+        b = np.fft.ifft(b)
 
     for n in range(0, int(N / 2)):
         tmp = b[n]
