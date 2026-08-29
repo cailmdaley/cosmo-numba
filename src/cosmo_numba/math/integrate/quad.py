@@ -145,10 +145,22 @@ def interp_quad(
     Returns
     -------
     tuple
-        Tuple with result, abserr, success.
+        Tuple with result, abserr, success. If `padding` is enabled and `fx`
+        holds fewer than `k + 1` nodes the spline is underdetermined and
+        `(nan, nan, False)` is returned.
     """
 
     len_fx = len(fx)
+
+    # A spline of degree `k` needs at least `k + 1` nodes. With fewer, the
+    # padding performed by the interpolator builds ghost cells from data that
+    # does not exist: the extrapolation reads past the array and returns
+    # arbitrary finite values -- sometimes of the same order as the signal
+    # itself -- that silently pass `isfinite` checks downstream. Fail loudly
+    # instead. (Periodic interpolation wraps modulo n and stays well-defined,
+    # so it is exempt.)
+    if padding and not periodic and len_fx < k + 1:
+        return np.nan, np.nan, False
 
     data = np.empty(len_fx + 9, dtype=np.float64)
     data[0] = np.float64(len_fx)
