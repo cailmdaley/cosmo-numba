@@ -20,6 +20,7 @@ from numpy.testing import assert_allclose
 
 from cosmo_numba.B_modes.schneider2022 import (
     PURE_EB_OUTPUTS,
+    get_bin_averaged_operator,
     get_pure_EB_covariance,
     get_pure_EB_modes,
     get_pure_EB_operator,
@@ -424,3 +425,98 @@ def test_covariance_rejects_bad_input(cov_setup):
     )
     with pytest.raises(ValueError, match="undefined"):
         get_pure_EB_covariance(edge, cov)
+
+
+@pytest.fixture(scope="module")
+def weighted_catalogue():
+    """Fine and coarse binned xi_pm of a toy weighted pair catalogue.
+
+    Fine bins of width 0.01 dex over [0.5, 200] arcmin, nested in ten coarse
+    bins over [1, 100] arcmin. Each pair carries a weight w_i * w_j and a
+    noisy xi_+ / xi_- estimate; binned values are weighted means, and the
+    fine-bin `weight` is the sum of pair weights, as in TreeCorr.
+    """
+    rng = np.random.default_rng(11)
+    fine_edges = 10 ** (np.arange(-30, 231) / 100)
+    coarse_edges = 10 ** (np.arange(0, 201, 20) / 100)
+    n_pair = 400_000
+    r = 10 ** rng.uniform(-0.3, 2.3, n_pair)
+    w = np.exp(rng.normal(0, 0.5, (2, n_pair))).prod(axis=0)
+    vp = 2e-5 * (r / 10) ** -0.65 * (1 + rng.normal(0, 1, n_pair))
+    vm = 6e-6 * (r / 10) ** -1.35 * (1 + rng.normal(0, 1, n_pair))
+
+    def binned(edges):
+        i = np.searchsorted(edges, r, side="right") - 1
+        n = edges.size - 1
+        ok = (i >= 0) & (i < n)
+        W = np.bincount(i[ok], w[ok], n)
+        N = np.bincount(i[ok], None, n).astype(float)
+        xp = np.bincount(i[ok], (w * vp)[ok], n) / W
+        xm = np.bincount(i[ok], (w * vm)[ok], n) / W
+        return xp, xm, W, N
+
+    theta_fine = np.sqrt(fine_edges[1:] * fine_edges[:-1])
+    return theta_fine, binned(fine_edges), coarse_edges, binned(coarse_edges)
+
+
+def test_bin_average_local_term_is_coarse_xi(weighted_catalogue):
+    """With pair weights, the averaged local term is the coarse-bin xi."""
+    ti, (xp, xm, W, N), edges, (xp_c, xm_c, _, _) = weighted_catalogue
+    tmin, tmax = ti[0] * (1 - 1e-9), ti[-1] * (1 + 1e-9)
+    inside = (ti >= edges[0]) & (ti < edges[-1])
+    theta = ti[inside]
+    single = get_pure_EB_operator(theta, ti, tmin, tmax, local_from_int=True)
+    split = get_pure_EB_operator(theta, ti, tmin, tmax)
+    v = np.concatenate([xp, xm])
+    v4 = np.concatenate([np.zeros(2 * theta.size), v])
+
+    def local_term(weights):
+        avg = get_bin_averaged_operator(single, theta, edges, weights)
+        avg_int = get_bin_averaged_operator(split, theta, edges, weights)
+        return [a @ v - b @ v4 for a, b in zip(avg, avg_int, strict=True)]
+
+    expected = (
+        0.5 * (xp_c + xm_c),
+        0.5 * (xp_c + xm_c),
+        0.5 * (xp_c - xm_c),
+        0.5 * (xp_c - xm_c),
+        0.0 * xp_c,
+        0.0 * xp_c,
+    )
+    scale = np.abs(xp_c).max()
+    for got, exp in zip(local_term(W[inside]), expected, strict=True):
+        assert_allclose(got, exp, rtol=0, atol=1e-12 * scale)
+    # Unweighted pair counts do not reproduce a weighted catalogue's xi.
+    got = local_term(N[inside])[0]
+    assert np.max(np.abs(got - expected[0])) > 1e-4 * scale
+
+
+def test_bin_average_is_weighted_mean(weighted_catalogue):
+    """The averaged operator is the weighted mean of the fine outputs."""
+    ti, (xp, xm, W, _), edges, _ = weighted_catalogue
+    tmin, tmax = ti[0] * (1 - 1e-9), ti[-1] * (1 + 1e-9)
+    # Evaluate on every fine node, including the edge rows the support
+    # leaves undefined: they lie outside the coarse bins and must not leak.
+    ops = get_pure_EB_operator(ti, ti, tmin, tmax, local_from_int=True)
+    assert np.isnan(ops[0]).any() and np.isnan(ops[1]).any()
+    avg = get_bin_averaged_operator(ops, ti, edges, W)
+    modes = [op @ np.concatenate([xp, xm]) for op in ops]
+    b = np.searchsorted(edges, ti, side="right") - 1
+    for a, m in zip(avg, modes, strict=True):
+        assert np.all(np.isfinite(a))
+        explicit = [
+            np.sum(W[b == j] * m[b == j]) / W[b == j].sum()
+            for j in range(edges.size - 1)
+        ]
+        assert_allclose(a @ np.concatenate([xp, xm]), explicit, rtol=1e-12)
+    uniform = get_bin_averaged_operator(ops, ti, edges)
+    explicit = [modes[2][b == j].mean() for j in range(edges.size - 1)]
+    assert_allclose(uniform[2] @ np.concatenate([xp, xm]), explicit)
+
+
+def test_bin_average_rejects_empty_bins(weighted_catalogue):
+    """A bin without any weighted theta raises."""
+    ti, _, edges, _ = weighted_catalogue
+    ops = get_pure_EB_operator(ti[:5], ti, ti[0], ti[-1], local_from_int=True)
+    with pytest.raises(ValueError, match="no theta"):
+        get_bin_averaged_operator(ops, ti[:5], edges)

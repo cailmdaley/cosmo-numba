@@ -488,3 +488,64 @@ def get_pure_EB_covariance(
         )
     out = M @ cov @ M.T
     return 0.5 * (out + out.T)
+
+
+def get_bin_averaged_operator(operator, theta, bin_edges, weights=None):
+    """get_bin_averaged_operator
+
+    Average an operator evaluated on a fine grid into coarse angular bins.
+
+    Each output in bin `b` is the weighted mean of its values at the `theta`
+    falling in `[bin_edges[b], bin_edges[b + 1])`, so the averaged operator is
+    `P @ M` with `P[b, i] = weights[i] / sum(weights in b)`. The usual setup
+    evaluates the operator at the fine-grid nodes inside the bins, with
+    `local_from_int=True` and `[tmin, tmax]` covering the fine grid, so that
+    every evaluation point has integration support on both sides.
+
+    With `weights` set to the pair weights of the fine bins (TreeCorr's
+    `weight` column, the sum of w_i * w_j over pairs) and fine bins nested in
+    the coarse ones, the averaged local term `0.5 * (xi_+ +/- xi_-)` is the
+    coarse-bin correlation function itself, as TreeCorr would measure it.
+    Plain pair counts give the same only for an unweighted catalogue.
+
+    Parameters
+    ----------
+    operator : tuple(numpy.ndarray(float64), ...)
+        Matrices returned by `get_pure_EB_operator`, evaluated at `theta`.
+    theta : numpy.ndarray(float64)
+        theta in arcmin at which the operator is evaluated
+    bin_edges : numpy.ndarray(float64)
+        Increasing edges of the coarse bins in arcmin.
+    weights : numpy.ndarray(float64), optional
+        Non-negative weight of each `theta`. Uniform if None.
+
+    Returns
+    -------
+    tuple(numpy.ndarray(float64), ...)
+        Averaged matrices, in the order of `operator`, each of shape
+        `(len(bin_edges) - 1, operator[0].shape[1])`. A NaN row of the
+        operator with non-zero weight makes its bin NaN.
+    """
+    theta = np.asarray(theta, dtype=np.float64)
+    bin_edges = np.asarray(bin_edges, dtype=np.float64)
+    if weights is None:
+        weights = np.ones(theta.size)
+    weights = np.asarray(weights, dtype=np.float64)
+    if weights.shape != theta.shape or np.any(weights < 0):
+        raise ValueError("weights must be non-negative, one per theta")
+    if operator[0].shape[0] != theta.size:
+        raise ValueError("the operator must have one row per theta")
+
+    n_bin = bin_edges.size - 1
+    b = np.searchsorted(bin_edges, theta, side="right") - 1
+    used = (b >= 0) & (b < n_bin) & (weights > 0)
+    P = np.zeros((n_bin, theta.size))
+    P[b[used], np.flatnonzero(used)] = weights[used]
+    norm = P.sum(axis=1)
+    if np.any(norm == 0):
+        raise ValueError(
+            f"bins {np.flatnonzero(norm == 0).tolist()} contain no theta "
+            "with non-zero weight"
+        )
+    P = P[:, used] / norm[:, None]
+    return tuple(P @ op[used] for op in operator)

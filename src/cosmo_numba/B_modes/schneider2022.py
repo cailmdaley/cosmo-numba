@@ -15,12 +15,14 @@ from .schneider2022_nb import (
 )
 from .schneider2022_operator import (
     PURE_EB_OUTPUTS,
+    get_bin_averaged_operator,
     get_pure_EB_covariance,
     get_pure_EB_operator,
 )
 
 __all__ = [
     "PURE_EB_OUTPUTS",
+    "get_bin_averaged_operator",
     "get_pure_EB_covariance",
     "get_pure_EB_modes",
     "get_pure_EB_operator",
