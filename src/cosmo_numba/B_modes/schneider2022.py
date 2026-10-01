@@ -7,10 +7,15 @@ Author: Axel Guinot
 
 """
 
+import numpy as np
+
 from .schneider2022_nb import (
     _get_pure_EB_modes_parallel,
     _get_pure_EB_modes_serial,
 )
+from .schneider2022_operator import get_pure_EB_operator
+
+__all__ = ["get_pure_EB_modes", "get_pure_EB_operator"]
 
 
 def get_pure_EB_modes(
@@ -28,10 +33,20 @@ def get_pure_EB_modes(
     interp_order=5,
     epsabs=1e-10,
     epsrel=1e-10,
+    quadrature="adaptive",
 ):
     """get_pure_EB_modes
 
-    Helper function to enable/disable parallelization.
+    Computes the pure E-/B-mode decomposition of Schneider et al. 2022
+    (https://arxiv.org/abs/2110.09774), Eqs. 42-56.
+
+    The integrals are computed on a degree-`interp_order` interpolant of the
+    integrands sampled on `theta_int`. With `quadrature="adaptive"` the
+    interpolant is integrated by QUADPACK's adaptive `dqags` to the tolerances
+    `epsabs`, `epsrel`. With `quadrature="fixed"` it is integrated exactly by
+    Gauss-Legendre quadrature on each grid cell, through the matrices of
+    `get_pure_EB_operator`: the result is then exactly linear in the inputs,
+    and `parallel`, `epsabs` and `epsrel` are not used.
 
     Parameters
     ----------
@@ -65,12 +80,32 @@ def get_pure_EB_modes(
         absolute error tolerance used in the integrals
     epsrel : float64
         relative error tolerance used in the integrals
+    quadrature : str
+        "adaptive" or "fixed", see above.
 
     Returns
     -------
-    tuple(float64, float64, float64, float64, float64, float64)
-        xi_plus_E, xi_minus_E, xi_amb_E, xi_plus_B, xi_minus_B, xi_amb_B
+    tuple(numpy.ndarray(float64), ...)
+        xi_plus_E, xi_minus_E, xi_plus_B, xi_minus_B, xi_plus_amb,
+        xi_minus_amb
     """
+
+    if quadrature == "fixed":
+        ops = get_pure_EB_operator(
+            theta,
+            theta_int,
+            tmin,
+            tmax,
+            pad_xim=pad_xim,
+            pad_theta_max_decade=pad_theta_max_decade,
+            interp_order=interp_order,
+        )
+        data = np.concatenate([xip, xim, xip_int, xim_int])
+        return tuple(op @ data for op in ops)
+    elif quadrature != "adaptive":
+        raise ValueError(
+            f"quadrature must be 'adaptive' or 'fixed', got {quadrature!r}"
+        )
 
     if parallel:
         return _get_pure_EB_modes_parallel(
