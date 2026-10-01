@@ -507,3 +507,26 @@ class TestNbInterp1D:
 
         with pytest.raises(ValueError):
             interp_class.eval(xi)
+
+
+@pytest.mark.parametrize("a", [-2.3, 1.5])
+@pytest.mark.parametrize("n", [6, 9, 12, 40])
+def test_clamped_end_points_stay_in_grid(a, n):
+    """
+    Evaluating at, or beyond, the end of the extrapolation range clamps to the
+    end point and must stay inside the padded grid: a constant is reproduced
+    exactly, on either sign of the coordinates.
+    """
+    k, e = 5, 1
+    h = 0.0738
+    x = a + h * np.arange(n)
+    f = np.ones(n)
+    lo, hi = x[0] - e * h, x[-1] + e * h
+    xout = np.array([lo, hi, lo - 3 * h, hi + 3 * h, x[0], x[-1]])
+
+    interp = nb_interp1d(x[0], x[-1], h, f, k, False, True, e, False)
+    assert_allclose(interp.eval(xout), 1.0, rtol=1e-12)
+
+    data = create_interp1d_data(f, x[0], x[-1], h, k, c=True, e=e)
+    out = [nb_interp1d_func(xo, data) for xo in xout]
+    assert_allclose(out, 1.0, rtol=1e-12)

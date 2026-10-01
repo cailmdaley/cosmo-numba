@@ -357,11 +357,11 @@ def _compute_bounds1(a, b, h, p, c, e, k):
         return a + d, b - d
     else:
         d = e * h
-        u = b + d
-        # the routines can fail when we exactly hit the right endpoint,
-        # this protects against that
-        u -= u * 1e-15
-        return a - d, u
+        # Keep both clamped end points strictly inside the padded grid:
+        # rounding at an end point can otherwise select a cell whose stencil
+        # reads past the padded array.
+        eps = 1e-12 * (h + abs(a) + abs(b))
+        return a - d + eps, b + d - eps
 
 
 @nb.njit(
