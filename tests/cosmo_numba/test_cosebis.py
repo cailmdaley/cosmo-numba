@@ -371,3 +371,31 @@ def test_cosebis_covariance_from_xipm_covariance():
         cov_EB = cosebis.cosebis_covariance_from_xipm_covariance(
             theta_bad[1:], cov_xipm
         )
+
+
+def test_cosebis_roots_insufficient_precision_raises():
+    """
+    On a narrow window the root finding loses digits mode after mode. At too
+    low a precision it returns a basis that is no longer orthonormal; this
+    must raise rather than return the wrong filters.
+    """
+    cosebis = COSEBIS(theta_min=1.0, theta_max=1.05, N_max=8, precision=30)
+    with pytest.raises(ValueError, match="not orthonormal"):
+        cosebis.compute_roots()
+
+    cosebis = COSEBIS(theta_min=1.0, theta_max=1.05, N_max=8, precision=80)
+    cosebis.compute_roots()
+    assert len(cosebis.roots) == 8
+
+
+def test_cosebis_roots_narrow_window_converge():
+    """
+    20 modes on [1, 1.318] arcmin are well defined at precision=120, but the
+    polynomial root finding needs more than its default 50 steps there.
+    """
+    cosebis = COSEBIS(theta_min=1.0, theta_max=1.318, N_max=20, precision=120)
+    cosebis.compute_roots()
+    assert len(cosebis.roots) == 20
+    for n, roots in enumerate(cosebis.roots, start=1):
+        assert roots.size == n + 1
+        assert np.all((roots > 0) & (roots < np.log(1.318)))

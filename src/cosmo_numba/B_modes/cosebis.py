@@ -437,6 +437,13 @@ def compute_roots_norms(Nmax, tmin, tmax, precision=80):
         List of arrays containing the roots for each mode.
     all_norm : list of sympy.Float
         List of normalizations for each mode.
+
+    Raises
+    ------
+    ValueError
+        If the basis cannot be computed at this `precision`: the root
+        finding fails, or the resulting functions are not orthonormal. The
+        precision needed grows with `Nmax` and as the window narrows.
     """
 
     z = sym.Symbol("z")
@@ -538,7 +545,14 @@ def compute_roots_norms(Nmax, tmin, tmax, precision=80):
         # Eq. 28
         tt = sym.summation(c[n - 1, i] * z ** (i), (i, 0, n + 1))
 
-        roots = sym.nroots(tt, n=precision)
+        try:
+            roots = sym.nroots(tt, n=precision, maxsteps=200)
+        except mp.NoConvergence as err:
+            raise ValueError(
+                _basis_error(
+                    Nmax, tmin, tmax, precision, n, "root finding failed"
+                )
+            ) from err
 
         r = sym.Array([sym.N(sym.re(roots[j]), 50) for j in range(0, n + 1)])
         # Eq. 36 (without normalization)
@@ -555,4 +569,58 @@ def compute_roots_norms(Nmax, tmin, tmax, precision=80):
         all_norm.append(sym.N(norm, 50))
         # tp_log.append(t * sym.N(norm, 50))
 
+    _check_orthonormal(all_roots, all_norm, zm, Nmax, tmin, tmax, precision)
+
     return all_roots, all_norm
+
+
+def _basis_error(Nmax, tmin, tmax, precision, n, what):
+    return (
+        f"COSEBIs basis on [{tmin}, {tmax}] arcmin with N_max={Nmax} at "
+        f"precision={precision}: {what} for mode {n}. The digits lost in "
+        "computing mode n grow with n and with narrower windows; increase "
+        "precision, or reduce N_max or widen the window."
+    )
+
+
+def _check_orthonormal(all_roots, all_norm, zm, Nmax, tmin, tmax, precision):
+    """Raise unless the T_plus_log functions are orthonormal (Eq. 31).
+
+    Precision loss in the root finding does not always raise; it can return
+    roots of a polynomial that is no longer orthogonal to the lower modes.
+    The Gram matrix of the computed functions is evaluated in product form,
+    which does not suffer from that loss, with a Gauss-Legendre rule far more
+    accurate than the tolerance for these polynomial times exponential
+    integrands.
+    """
+    with mp.workdps(60):
+        zm = mp.mpf(str(zm))
+        nodes, weights = np.polynomial.legendre.leggauss(Nmax + 40)
+        z = [zm * (mp.mpf(float(x)) + 1) / 2 for x in nodes]
+        w = [
+            zm / 2 * mp.mpf(float(x)) * mp.exp(zz)
+            for x, zz in zip(weights, z, strict=True)
+        ]
+        T = []
+        for roots, norm in zip(all_roots, all_norm, strict=True):
+            r = [mp.mpf(str(x)) for x in roots]
+            T.append(
+                [mp.mpf(str(norm)) * mp.fprod(zz - x for x in r) for zz in z]
+            )
+        scale = mp.exp(zm) - 1
+        for n in range(Nmax):
+            for m in range(n + 1):
+                g = mp.fsum(
+                    wi * a * b for wi, a, b in zip(w, T[n], T[m], strict=True)
+                )
+                if abs(g / scale - (n == m)) > 1e-10:
+                    raise ValueError(
+                        _basis_error(
+                            Nmax,
+                            tmin,
+                            tmax,
+                            precision,
+                            n + 1,
+                            "the computed basis is not orthonormal",
+                        )
+                    )
