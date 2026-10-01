@@ -13,9 +13,18 @@ from .schneider2022_nb import (
     _get_pure_EB_modes_parallel,
     _get_pure_EB_modes_serial,
 )
-from .schneider2022_operator import get_pure_EB_operator
+from .schneider2022_operator import (
+    PURE_EB_OUTPUTS,
+    get_pure_EB_covariance,
+    get_pure_EB_operator,
+)
 
-__all__ = ["get_pure_EB_modes", "get_pure_EB_operator"]
+__all__ = [
+    "PURE_EB_OUTPUTS",
+    "get_pure_EB_covariance",
+    "get_pure_EB_modes",
+    "get_pure_EB_operator",
+]
 
 
 def get_pure_EB_modes(

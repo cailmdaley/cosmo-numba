@@ -31,6 +31,9 @@ from ..math.interpolate.interpolate_1D import _extrapolate1d, nb_interp1d
 from ..math.utils import extend_log_grid
 from .schneider2022_nb import H_m, H_p, K_m, K_p
 
+# Order of the outputs of get_pure_EB_modes and get_pure_EB_operator.
+PURE_EB_OUTPUTS = ("xip_E", "xim_E", "xip_B", "xim_B", "xip_amb", "xim_amb")
+
 # Extrapolation distance used by every interp_quad call in schneider2022_nb.
 _EXTRAP_DIST = 1
 
@@ -429,3 +432,59 @@ def get_pure_EB_operator(
         op[rows, col_m] -= 0.5
 
     return ops
+
+
+def get_pure_EB_covariance(
+    operator, cov, outputs=("xip_E", "xim_E", "xip_B", "xim_B")
+):
+    """get_pure_EB_covariance
+
+    Covariance of pure E/B modes, `M C M^T`, from the covariance `C` of the
+    correlation functions they are computed from. `C` can come from any
+    source (analytic, jackknife, mocks); with the fixed-quadrature operator
+    the propagation is exact.
+
+    Parameters
+    ----------
+    operator : tuple(numpy.ndarray(float64), ...)
+        Matrices returned by `get_pure_EB_operator`.
+    cov : numpy.ndarray(float64)
+        Covariance of the vector the matrices act on:
+        `concatenate([xip_int, xim_int])` for an operator built with
+        `local_from_int=True`, `concatenate([xip, xim, xip_int, xim_int])`
+        otherwise.
+    outputs : sequence of str
+        Outputs to include, among `PURE_EB_OUTPUTS`
+        (`"xip_E", "xim_E", "xip_B", "xim_B", "xip_amb", "xim_amb"`).
+
+    Returns
+    -------
+    numpy.ndarray(float64)
+        Joint covariance of the outputs stacked in the order of `outputs`:
+        block `(i, j)`, of shape `(len(theta), len(theta))`, is the
+        covariance of `outputs[i]` with `outputs[j]`.
+    """
+    unknown = [name for name in outputs if name not in PURE_EB_OUTPUTS]
+    if unknown:
+        raise ValueError(
+            f"unknown outputs {unknown}, expected names in {PURE_EB_OUTPUTS}"
+        )
+    M = np.concatenate(
+        [operator[PURE_EB_OUTPUTS.index(name)] for name in outputs]
+    )
+    cov = np.asarray(cov, dtype=np.float64)
+    if cov.shape != (M.shape[1], M.shape[1]):
+        raise ValueError(
+            f"cov has shape {cov.shape}, the operator acts on vectors of "
+            f"length {M.shape[1]}"
+        )
+    bad = np.flatnonzero(~np.isfinite(M).all(axis=1))
+    if bad.size:
+        n_theta = operator[0].shape[0]
+        where = [(outputs[i // n_theta], int(i % n_theta)) for i in bad]
+        raise ValueError(
+            "the operator is undefined (NaN) where the integration support "
+            f"is too small, at (output, theta index): {where}"
+        )
+    out = M @ cov @ M.T
+    return 0.5 * (out + out.T)

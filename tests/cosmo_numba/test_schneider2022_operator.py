@@ -19,6 +19,8 @@ import pytest
 from numpy.testing import assert_allclose
 
 from cosmo_numba.B_modes.schneider2022 import (
+    PURE_EB_OUTPUTS,
+    get_pure_EB_covariance,
     get_pure_EB_modes,
     get_pure_EB_operator,
 )
@@ -323,3 +325,102 @@ def test_unknown_quadrature(ccl):
     args = _geometry("two grids", ccl)
     with pytest.raises(ValueError, match="quadrature"):
         get_pure_EB_modes(*args, quadrature="gauss")
+
+
+@pytest.fixture(scope="module")
+def cov_setup():
+    """Coarse grid, smooth xi_pm and a correlated Gaussian xi_pm covariance."""
+    theta_int = np.geomspace(1.0, 200.0, 50)
+    xip = 2e-5 * (theta_int / 10.0) ** -0.65
+    xim = 6e-6 * (theta_int / 10.0) ** -1.35
+    x = np.log(theta_int)
+    corr = np.exp(-0.5 * ((x[:, None] - x[None, :]) / 0.3) ** 2)
+    sig = np.concatenate([0.3 * xip, 0.3 * xim])
+    blocks = np.block([[corr, 0.5 * corr], [0.5 * corr, corr]])
+    cov = sig[:, None] * (blocks + 1e-3 * np.eye(100)) * sig[None, :]
+    theta = theta_int[8:42:3]
+    return theta, theta_int, xip, xim, cov
+
+
+def test_covariance_matches_monte_carlo(cov_setup):
+    """M C M^T matches the scatter of Gaussian draws through the transform.
+
+    The draws are transformed with the two-vector operator (local term from
+    the evaluation-grid values), independently of the single-vector operator
+    the covariance is built from.
+    """
+    theta, ti, xip, xim, cov = cov_setup
+    tmin, tmax = ti[0], ti[-1]
+    op = get_pure_EB_operator(theta, ti, tmin, tmax, local_from_int=True)
+    analytic = get_pure_EB_covariance(op, cov, outputs=PURE_EB_OUTPUTS)
+
+    n_draw = 20000
+    rng = np.random.default_rng(5)
+    draws = rng.multivariate_normal(np.concatenate([xip, xim]), cov, n_draw)
+    idx = np.searchsorted(ti, theta)
+    n = ti.size
+    data = np.hstack([draws[:, idx], draws[:, n + idx], draws])
+    op4 = get_pure_EB_operator(theta, ti, tmin, tmax)
+    modes = np.hstack([data @ m.T for m in op4])
+    empirical = np.cov(modes, rowvar=False)
+
+    sd = np.sqrt(np.diag(analytic))
+    assert_allclose(np.sqrt(np.diag(empirical)), sd, rtol=0.05)
+    # Correlation coefficients agree to a few times 1/sqrt(n_draw).
+    r_an = analytic / np.outer(sd, sd)
+    r_mc = empirical / np.outer(sd, sd)
+    assert np.max(np.abs(r_mc - r_an)) < 5 / np.sqrt(n_draw)
+
+
+def test_covariance_structure(cov_setup):
+    """Symmetric PSD, documented block order, and every input form."""
+    theta, ti, xip, xim, cov = cov_setup
+    tmin, tmax = ti[0], ti[-1]
+    n = theta.size
+    op = get_pure_EB_operator(theta, ti, tmin, tmax, local_from_int=True)
+    full = get_pure_EB_covariance(op, cov, outputs=PURE_EB_OUTPUTS)
+    assert full.shape == (6 * n, 6 * n)
+    assert_allclose(full, full.T, rtol=0, atol=0)
+    eig = np.linalg.eigvalsh(full)
+    assert eig.min() > -1e-10 * eig.max()
+
+    # Blocks follow the order of `outputs`.
+    sub = get_pure_EB_covariance(op, cov, outputs=("xim_B", "xip_E"))
+    i_mB = PURE_EB_OUTPUTS.index("xim_B")
+    i_pE = PURE_EB_OUTPUTS.index("xip_E")
+    assert_allclose(
+        sub[:n, n:], full[i_mB * n : (i_mB + 1) * n, i_pE * n : (i_pE + 1) * n]
+    )
+    assert_allclose(sub[:n, n:], op[i_mB] @ cov @ op[i_pE].T)
+
+    # Two-vector form: the same covariance once the evaluation-grid values
+    # are the integration-grid values at the same nodes.
+    op4 = get_pure_EB_operator(theta, ti, tmin, tmax)
+    idx = np.searchsorted(ti, theta)
+    sel = np.zeros((2 * n + 2 * ti.size, 2 * ti.size))
+    sel[np.arange(n), idx] = 1
+    sel[n + np.arange(n), ti.size + idx] = 1
+    sel[2 * n :, :] = np.eye(2 * ti.size)
+    assert_allclose(
+        get_pure_EB_covariance(
+            op4, sel @ cov @ sel.T, outputs=PURE_EB_OUTPUTS
+        ),
+        full,
+        rtol=1e-12,
+        atol=1e-12 * np.abs(full).max(),
+    )
+
+
+def test_covariance_rejects_bad_input(cov_setup):
+    """Unknown names, wrong shapes and undefined rows raise."""
+    theta, ti, xip, xim, cov = cov_setup
+    op = get_pure_EB_operator(theta, ti, ti[0], ti[-1], local_from_int=True)
+    with pytest.raises(ValueError, match="unknown outputs"):
+        get_pure_EB_covariance(op, cov, outputs=("xip_EE",))
+    with pytest.raises(ValueError, match="shape"):
+        get_pure_EB_covariance(op, cov[:-2, :-2])
+    edge = get_pure_EB_operator(
+        ti[-3:], ti, ti[0], ti[-1], local_from_int=True
+    )
+    with pytest.raises(ValueError, match="undefined"):
+        get_pure_EB_covariance(edge, cov)
