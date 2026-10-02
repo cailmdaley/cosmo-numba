@@ -121,7 +121,7 @@ def K_p(t, t_int, theta_bar, B):
     numpy.ndarray(float64)
         K_plus
     """
-    return (theta_bar / t) ** 2 * H_m(t, t_int, theta_bar, B)
+    return (theta_bar / t) ** 2 * H_m(t_int, t, theta_bar, B)
 
 
 @nb.njit
