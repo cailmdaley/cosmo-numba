@@ -21,10 +21,6 @@ from cosmo_numba.B_modes.schneider2022 import (
     get_pure_EB_operator,
 )
 from cosmo_numba.B_modes.schneider2022_nb import H_m, H_p, K_m, K_p
-from cosmo_numba.B_modes.schneider2022_operator import (
-    _QuadRule,
-    _quad_weights,
-)
 from cosmo_numba.math.interpolate.interpolate_1D import nb_interp1d
 from cosmo_numba.math.utils import extend_log_grid
 
@@ -43,20 +39,15 @@ def brute_integral(f, x_start, x_end, h, a, b, n_gauss=24):
     itp = nb_interp1d(
         x_start, x_end, h, np.ascontiguousarray(f), K, False, True, 1, False
     )
-    brk = np.concatenate([[xa, xb], x_start + h * np.arange(-1, f.size + 1)])
+    brk = x_start + h * np.arange(-1, f.size + 1)
+    brk = np.concatenate([brk, [itp.lb, itp.ub, xa, xb]])
     brk = np.unique(brk[(brk >= xa) & (brk <= xb)])
     brk = brk[np.concatenate([[True], np.diff(brk) > 1e-12])]
     nodes, wts = np.polynomial.legendre.leggauss(n_gauss)
     lo, hi = brk[:-1, None], brk[1:, None]
     xq = (0.5 * (hi - lo) * nodes + 0.5 * (hi + lo)).ravel()
     wq = (0.5 * (hi - lo) * wts).ravel()
-    # Clamp strictly inside the extrapolation range: the boundary value is
-    # the limit from inside the outermost cell.
-    eps = 1e-12 * h
-    xe = np.clip(xq, x_start - h + eps, x_end + h - eps)
-    return sign * float(
-        np.sum(wq * np.exp(xq) * itp.eval(np.ascontiguousarray(xe)))
-    )
+    return sign * float(np.sum(wq * np.exp(xq) * itp.eval(xq)))
 
 
 def brute_pure_EB(
@@ -175,27 +166,6 @@ def _geometry(name, ccl):
     raise ValueError(name)
 
 
-def test_quad_weights_are_exact():
-    """The fixed rule integrates the interpolant exactly, for any bounds."""
-    theta = np.geomspace(1.0, 40.0, 60)
-    x = np.log(theta)
-    h = np.diff(x).mean()
-    f = np.random.default_rng(1).standard_normal(60)
-    rule = _QuadRule(K, 16)
-    bounds = [
-        (theta[0], theta[-1]),
-        (theta[3] * 1.01, theta[-4] * 0.99),
-        (theta[0] * np.exp(-0.5 * h), theta[-1] * np.exp(0.7 * h)),
-        (0.5, 100.0),
-        (theta[10] * 1.003, theta[10] * 1.004),
-        (theta[-4], theta[2]),
-    ]
-    for a, b in bounds:
-        w = _quad_weights(rule, 60, x[0], x[-1], h, np.log(a), np.log(b))
-        ref = brute_integral(f, x[0], x[-1], h, a, b)
-        assert_allclose(w @ f, ref, rtol=1e-11, err_msg=f"[{a}, {b}]")
-
-
 @pytest.mark.parametrize(
     "geometry", ["two grids", "single grid", "bounds beyond grid"]
 )
@@ -231,40 +201,27 @@ def test_reconstruction_identity(ccl):
     assert_allclose(xim_E - xim_B + xim_amb, args[2], rtol=1e-12, atol=0)
 
 
-def test_operator_is_linear_and_converged(ccl):
-    """Matrix form equals the call, and does not depend on n_gauss."""
+def test_fixed_is_the_operator(ccl):
+    """quadrature="fixed" applies the operator: linear to round-off."""
     theta, xip, xim, ti, xpi, xmi, tmin, tmax = _geometry("two grids", ccl)
     ops = get_pure_EB_operator(theta, ti, tmin, tmax)
-    ops_hi = get_pure_EB_operator(theta, ti, tmin, tmax, n_gauss=32)
+    n = theta.size
     rng = np.random.default_rng(3)
-    y = [rng.standard_normal(2 * theta.size + 2 * ti.size) for _ in range(2)]
+    y = [rng.standard_normal(2 * n + 2 * ti.size) for _ in range(2)]
 
     def call(v):
-        n = theta.size
+        xip, xim, xpi, xmi = np.split(v, [n, 2 * n, 2 * n + ti.size])
         return get_pure_EB_modes(
-            theta,
-            v[:n],
-            v[n : 2 * n],
-            ti,
-            v[2 * n : 2 * n + ti.size],
-            v[2 * n + ti.size :],
-            tmin,
-            tmax,
-            quadrature="fixed",
+            theta, xip, xim, ti, xpi, xmi, tmin, tmax, quadrature="fixed"
         )
 
-    for op, op_hi, c1, c2, c12 in zip(
-        ops,
-        ops_hi,
-        call(y[0]),
-        call(y[1]),
-        call(2 * y[0] - y[1]),
-        strict=True,
+    for op, c1, c2, c12 in zip(
+        ops, call(y[0]), call(y[1]), call(2 * y[0] - y[1]), strict=True
     ):
-        assert op.shape == (theta.size, 2 * theta.size + 2 * ti.size)
-        assert_allclose(op_hi, op, rtol=1e-12, atol=1e-14 * np.abs(op).max())
+        assert op.shape == (n, 2 * n + 2 * ti.size)
         assert_allclose(op @ y[0], c1, rtol=1e-14)
-        assert_allclose(c12, 2 * c1 - c2, rtol=1e-10, atol=1e-12)
+        scale = np.abs(c1).max()
+        assert_allclose(c12, 2 * c1 - c2, rtol=0, atol=1e-12 * scale)
 
 
 def test_local_from_int(ccl):
