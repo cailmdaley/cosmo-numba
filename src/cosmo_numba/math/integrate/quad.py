@@ -252,7 +252,7 @@ def interp_quad_weights(
     b : float
         Upper bound of the integral.
     k : int, optional
-        Degree of interpolation, by default 3
+        Degree of interpolation (1, 3, 5, 7 or 9), by default 3
     padding : bool, optional
         See interp1d, by default True
     extrap_dist : int, optional
@@ -265,6 +265,8 @@ def interp_quad_weights(
     numpy.ndarray
         Weights, of length `n`.
     """
+    if k < 1 or k > 9 or k % 2 == 0:
+        raise ValueError("k must be 1, 3, 5, 7 or 9")
     if n < k + 1:
         return np.full(n, np.nan)
     h = x_step

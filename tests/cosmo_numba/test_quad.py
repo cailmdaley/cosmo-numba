@@ -146,7 +146,7 @@ def brute_integral(fx, x_start, x_end, h, a, b, k, e, log_interp):
 
 
 @pytest.mark.parametrize("log_interp", [True, False])
-@pytest.mark.parametrize("k, e", [(3, 0), (5, 1)])
+@pytest.mark.parametrize("k, e", [(1, 0), (3, 0), (5, 1), (9, 2)])
 def test_quad_weights_are_exact(log_interp, k, e):
     """
     The fixed rule integrates the interpolant exactly, for any bounds.
@@ -213,3 +213,12 @@ def test_quad_weights_undetermined():
     w = interp_quad_weights(0.0, 0.4, 0.1, 5, 0.0, 0.4, k=5, extrap_dist=1)
     assert w.shape == (5,)
     assert np.all(np.isnan(w))
+
+
+def test_quad_weights_unsupported_order():
+    """
+    Even and out-of-range orders have no stencil.
+    """
+    for k in (0, 2, 4, 11):
+        with pytest.raises(ValueError):
+            interp_quad_weights(0.0, 1.0, 0.1, 11, 0.0, 1.0, k=k)
