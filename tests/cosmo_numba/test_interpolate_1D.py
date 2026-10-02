@@ -10,6 +10,7 @@ from numpy.testing import assert_allclose
 
 from cosmo_numba.math.interpolate.interpolate_1D import (
     AkimaInterp1D,
+    interp1d_weights,
     nb_interp1d,
     nb_interp1d_func,
 )
@@ -507,3 +508,55 @@ class TestNbInterp1D:
 
         with pytest.raises(ValueError):
             interp_class.eval(xi)
+
+    # ================================================================
+    # Stencil weights
+    # ================================================================
+
+    @pytest.mark.parametrize("k", [1, 3, 5, 7, 9])
+    @pytest.mark.parametrize(
+        "p, c, e",
+        [
+            (False, True, 0),
+            (False, True, 1),
+            (False, True, 2),
+            (False, False, 0),
+            (True, False, 0),
+        ],
+    )
+    def test_weights_match_eval(self, k, p, c, e):
+        """
+        interp1d_weights is the linear map the interpolator applies.
+        """
+        n, a, h = 40, 0.3, 0.1
+        b = a + (n - 1) * h
+        f = np.random.default_rng(k).standard_normal(n)
+        # Inside the grid, beyond the clamping bounds and on them.
+        xout = np.concatenate(
+            [np.linspace(a - 1.0, b + 1.0, 301), [a - e * h, b + e * h]]
+        )
+        weights = interp1d_weights(xout, a, b, h, n, k, p, c, e, False)
+        interp = nb_interp1d(a, b, h, f, k, p, c, e, False)
+        assert weights.shape == (xout.size, n)
+        assert_allclose(weights @ f, interp.eval(xout), rtol=0, atol=1e-11)
+
+        # In log space.
+        xout = np.exp(np.linspace(a, b, 50))
+        weights = interp1d_weights(xout, a, b, h, n, k, p, c, e, True)
+        interp = nb_interp1d(a, b, h, f, k, p, c, e, True)
+        assert_allclose(weights @ f, interp.eval(xout), rtol=0, atol=1e-11)
+
+    def test_upper_clamp_stays_in_data(self):
+        """
+        At the upper clamping bound, the stencil stays inside the padded
+        samples when `b` differs from `a + (n - 1) h` by round-off, as for a
+        sub-grid of a log grid with the step of the full grid.
+        """
+        x = np.log(np.geomspace(0.5, 800.0, 1000))
+        h = np.mean(np.diff(x))
+        for i in range(0, 900, 7):
+            sub = x[i:]
+            interp = nb_interp1d(
+                sub[0], sub[-1], h, np.ones(sub.size), 5, False, True, 1, False
+            )
+            assert_allclose(interp.eval(np.array([sub[-1] + 2 * h])), 1.0)
