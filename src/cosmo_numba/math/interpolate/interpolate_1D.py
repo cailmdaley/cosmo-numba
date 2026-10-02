@@ -409,58 +409,6 @@ def _extrapolate1d(f, k, p, c, e):
         return f, 0
 
 
-@nb.njit
-def interp1d_weights(
-    xout,
-    a,
-    b,
-    h,
-    n,
-    k,
-    p=False,
-    c=True,
-    e=0,
-    log_interp=False,
-):
-    """Linear map from the samples to the interpolant.
-
-    Returns the matrix `W` such that, for any samples `f` of length `n`,
-    `W @ f` equals `nb_interp1d(a, b, h, f, k, p, c, e, log_interp)` evaluated
-    at `xout`. Row `m` holds the stencil weights at `xout[m]`, with the
-    weights of the ghost samples added by padding folded back onto the
-    samples they are extrapolated from.
-
-    Parameters
-    ----------
-    xout : numpy.ndarray
-        Points where to interpolate.
-    n : int
-        Number of samples.
-    a, b, h, k, p, c, e, log_interp
-        See `nb_interp1d`.
-
-    Returns
-    -------
-    numpy.ndarray
-        Weights, of shape `(len(xout), n)`.
-    """
-    o = k // 2 + e if (c and not p) else 0
-    lb, ub = _compute_bounds1(a, b, h, p, c, e, k)
-    x = np.log(xout) if log_interp else xout.astype(np.float64)
-    asx = np.empty(k + 1)
-    w = np.empty(n + 2 * o)
-    W = np.empty((x.shape[0], n))
-    for mi in range(x.shape[0]):
-        ix, ratx = _locate(x[mi], a, h, n, k, p, o, lb, ub)
-        stencil_weights(ratx, k, asx)
-        ix += o - k // 2
-        w[:] = 0.0
-        for i in range(k + 1):
-            w[(ix + i) % n if p else ix + i] += asx[i]
-        W[mi] = _extrapolate1d_adjoint(w, k, o)
-    return W
-
-
 class _nb_interp1d:
     """
     1D Interpolator using local Taylor expansions

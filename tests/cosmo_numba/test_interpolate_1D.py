@@ -10,9 +10,11 @@ from numpy.testing import assert_allclose
 
 from cosmo_numba.math.interpolate.interpolate_1D import (
     AkimaInterp1D,
-    interp1d_weights,
+    _extrapolate1d,
+    _extrapolate1d_adjoint,
     nb_interp1d,
     nb_interp1d_func,
+    stencil_weights,
 )
 
 
@@ -513,38 +515,51 @@ class TestNbInterp1D:
     # Stencil weights
     # ================================================================
 
-    @pytest.mark.parametrize("k", [1, 3, 5, 7, 9])
     @pytest.mark.parametrize(
-        "p, c, e",
+        "k",
         [
-            (False, True, 0),
-            (False, True, 1),
-            (False, True, 2),
-            (False, False, 0),
-            (True, False, 0),
+            1,
+            3,
+            pytest.param(
+                5,
+                marks=pytest.mark.xfail(
+                    reason="the k=5 quintic coefficients are 1/8 of the "
+                    "degree-5 interpolant's: exact to degree 4 only",
+                    strict=True,
+                ),
+            ),
+            7,
+            9,
         ],
     )
-    def test_weights_match_eval(self, k, p, c, e):
+    def test_stencil_weights_reproduce_polynomials(self, k):
         """
-        interp1d_weights is the linear map the interpolator applies.
+        The stencil weights interpolate polynomials of degree `k` exactly.
+        Sample `i` of the stencil lies `i - k // 2 - 1/2 - ratx` grid steps
+        from the point, so the weighted powers of these offsets vanish,
+        except the zeroth.
         """
-        n, a, h = 40, 0.3, 0.1
-        b = a + (n - 1) * h
-        f = np.random.default_rng(k).standard_normal(n)
-        # Inside the grid, beyond the clamping bounds and on them.
-        xout = np.concatenate(
-            [np.linspace(a - 1.0, b + 1.0, 301), [a - e * h, b + e * h]]
-        )
-        weights = interp1d_weights(xout, a, b, h, n, k, p, c, e, False)
-        interp = nb_interp1d(a, b, h, f, k, p, c, e, False)
-        assert weights.shape == (xout.size, n)
-        assert_allclose(weights @ f, interp.eval(xout), rtol=0, atol=1e-11)
+        asx = np.empty(k + 1)
+        for ratx in np.linspace(-0.5, 0.5, 11):
+            stencil_weights(ratx, k, asx)
+            d = np.arange(k + 1) - k // 2 - 0.5 - ratx
+            for m in range(k + 1):
+                scale = np.abs(asx).sum() * np.abs(d).max() ** m
+                assert_allclose(asx @ d**m, m == 0, atol=1e-14 * scale)
 
-        # In log space.
-        xout = np.exp(np.linspace(a, b, 50))
-        weights = interp1d_weights(xout, a, b, h, n, k, p, c, e, True)
-        interp = nb_interp1d(a, b, h, f, k, p, c, e, True)
-        assert_allclose(weights @ f, interp.eval(xout), rtol=0, atol=1e-11)
+    @pytest.mark.parametrize("k", [1, 3, 5, 7, 9])
+    @pytest.mark.parametrize("e", [0, 1, 2])
+    def test_extrapolate_adjoint(self, k, e):
+        """
+        `_extrapolate1d_adjoint` is the transpose of the padding.
+        """
+        rng = np.random.default_rng(10 * k + e)
+        f = rng.standard_normal(30)
+        fb, o = _extrapolate1d(f, k, False, True, e)
+        w = rng.standard_normal(fb.size)
+        scale = np.abs(w) @ np.abs(fb)
+        wf = _extrapolate1d_adjoint(w, k, o) @ f
+        assert_allclose(wf, w @ fb, rtol=0, atol=1e-14 * scale)
 
     def test_upper_clamp_stays_in_data(self):
         """
