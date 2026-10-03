@@ -150,10 +150,9 @@ def test_pure_eb():
         rtol=1e-12,
     )
 
-    # Check that padding improve B-mode on xim
-    norm_pad = np.linalg.norm(xim_B_model)
-    norm_no_pad = np.linalg.norm(xim_B_model_no_pad)
-    assert norm_pad < norm_no_pad
+    # Without padding the decomposition on [tmin, tmax] is exact, so the
+    # pure-E model leaves only interpolation error in the xim B mode
+    assert np.max(np.abs(xim_B_model_no_pad / xim_model)) < 1e-3
 
     # Check that B-mode on xip are unchanged
     assert_array_equal(
@@ -263,11 +262,6 @@ def test_pure_eb_linearity():
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="K_p evaluates H_m(t, t_int) where Schneider et al. 2022 Eq. 51 "
-    "has H_m(t_int, t), which leaks pure-E xi_+ into the xi_- B mode",
-)
 def test_pure_eb_no_leakage_narrow_window():
     """
     Test that pure-E input gives no B modes on a narrow, unpadded window.
