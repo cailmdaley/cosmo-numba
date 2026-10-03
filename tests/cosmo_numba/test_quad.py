@@ -121,12 +121,6 @@ def test_quad_log_spacing():
     assert_allclose(res, 356.48754262594207, atol=max(err, 1e-10), rtol=0)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="with k or fewer samples the degree-k interpolant is "
-    "undetermined; the padding reads uninitialised or out-of-bounds memory "
-    "and the integral is run-dependent garbage instead of NaN",
-)
 @pytest.mark.parametrize("k", [1, 3, 5])
 def test_quad_undersupported_is_nan(k):
     """

@@ -145,10 +145,16 @@ def interp_quad(
     Returns
     -------
     tuple
-        Tuple with result, abserr, success.
+        Tuple with result, abserr, success. With no samples the integral is
+        0. With 1 to `k` samples the degree-`k` interpolant is undetermined,
+        so the result and abserr are NaN and success is False.
     """
 
     len_fx = len(fx)
+    if len_fx == 0:
+        return 0.0, 0.0, True
+    if len_fx <= k:
+        return np.nan, np.nan, False
 
     data = np.empty(len_fx + 9, dtype=np.float64)
     data[0] = np.float64(len_fx)
