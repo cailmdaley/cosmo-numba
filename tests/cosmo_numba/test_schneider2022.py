@@ -189,11 +189,6 @@ def _pure_eb(theta, theta_int, xipm_int, tmin, tmax):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the adaptive quadrature (dqags) chooses its subdivision from the "
-    "data, so the modes are not linear in xi_pm and noise rectifies",
-)
 def test_pure_eb_linearity():
     """
     Test that the pure E/B transform is linear in the input xi_pm.
