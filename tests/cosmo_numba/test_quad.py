@@ -4,6 +4,7 @@ if os.environ.get("COVERAGE_MODE", "0") == "1":
     os.environ["TESTING_QUAD"] = "1"
 
 import numpy as np
+import pytest
 from numpy.testing import assert_allclose
 
 from cosmo_numba.math.integrate.quad import interp_quad
@@ -118,3 +119,33 @@ def test_quad_log_spacing():
 
     assert success
     assert_allclose(res, 356.48754262594207, atol=max(err, 1e-10), rtol=0)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="with k or fewer samples the degree-k interpolant is "
+    "undetermined; the padding reads uninitialised or out-of-bounds memory "
+    "and the integral is run-dependent garbage instead of NaN",
+)
+@pytest.mark.parametrize("k", [1, 3, 5])
+def test_quad_undersupported_is_nan(k):
+    """
+    With 1 to k samples the degree-k interpolant is undetermined, so its
+    integral is NaN.
+    """
+    h = 0.1
+    for n in range(1, k + 1):
+        res = interp_quad(
+            0.0,
+            (n - 1) * h,
+            h,
+            1.0 + np.arange(n, dtype=np.float64),
+            -0.5 * h,
+            (n - 0.5) * h,
+            k=k,
+            periodic=False,
+            padding=True,
+            extrap_dist=1,
+            log_interp=False,
+        )[0]
+        assert np.isnan(res), f"n={n}: {res}"
