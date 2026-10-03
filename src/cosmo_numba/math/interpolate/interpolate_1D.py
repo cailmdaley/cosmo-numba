@@ -158,151 +158,46 @@ AkimaInterp1D = nb.experimental.jitclass(spec_akima)(_AkimaInterp1D)
 
 
 @nb.njit(
-    nb.int64(
-        nb.float64,
-        nb.float64,
-        nb.int64,
-        nb.int64,
-        nb.int64,
-        nb.boolean,
-    ),
-    fastmath=True,
-)
-def _cell_index(xx, h, n, o, k, p):
-    """Cell of `xx` (offset from the grid start), kept inside the padded
-    data: at the clamping bounds, round-off in `xx / h` can otherwise point
-    one cell beyond the array."""
-    ix = int(xx // h)
-    if p:
-        return ix
-    return min(max(ix, k // 2 - o), n + o - k // 2 - 2)
-
-
-@nb.njit(
     nb.void(
-        nb.float64[:],  # f
-        nb.float64[:],  # xout
-        nb.float64[:],  # fout
-        nb.float64,  # a
-        nb.float64,  # h
-        nb.int64,  # n
-        nb.boolean,  # p
-        nb.int64,  # o
-        nb.float64,  # lb
-        nb.float64,  # ub
+        nb.float64,  # ratx
+        nb.int64,  # k
+        nb.float64[:],  # asx
     ),
     fastmath=True,
 )
-def _interp1d_k1(f, xout, fout, a, h, n, p, o, lb, ub):
-    m = fout.shape[0]
-    for mi in nb.prange(m):
-        xr = min(max(xout[mi], lb), ub)
-        xx = xr - a
-        ix = _cell_index(xx, h, n, o, 1, p)
-        ratx = xx / h - (ix + 0.5)
-        asx = np.empty(2)
+def stencil_weights(ratx, k, asx):
+    """Weights of the local Taylor stencil of degree `k`.
+
+    On grid cell `ix`, the interpolant is the degree-`k` polynomial
+    `sum_i asx[i] * f[ix - k // 2 + i]`, `i = 0, ..., k`, through the `k + 1`
+    samples around the cell, where `ratx` is the position relative to the
+    cell centre in units of the grid step (-1/2 and 1/2 at the cell edges).
+
+    Parameters
+    ----------
+    ratx : float
+        Position in the cell.
+    k : int
+        Order of the local Taylor expansion (1, 3, 5, 7 or 9).
+    asx : numpy.ndarray
+        Output array of length `k + 1`, filled with the weights.
+    """
+    if k == 1:
         asx[0] = 0.5 - ratx
         asx[1] = 0.5 + ratx
-        ix += o
-        fout[mi] = 0.0
-        for i in range(2):
-            ixi = (ix + i) % n if p else ix + i
-            fout[mi] += f[ixi] * asx[i]
-
-
-@nb.njit(
-    nb.void(
-        nb.float64[:],  # f
-        nb.float64[:],  # xout
-        nb.float64[:],  # fout
-        nb.float64,  # a
-        nb.float64,  # h
-        nb.int64,  # n
-        nb.boolean,  # p
-        nb.int64,  # o
-        nb.float64,  # lb
-        nb.float64,  # ub
-    ),
-    fastmath=True,
-)
-def _interp1d_k3(f, xout, fout, a, h, n, p, o, lb, ub):
-    m = fout.shape[0]
-    for mi in nb.prange(m):
-        xr = min(max(xout[mi], lb), ub)
-        xx = xr - a
-        ix = _cell_index(xx, h, n, o, 3, p)
-        ratx = xx / h - (ix + 0.5)
-        asx = np.empty(4)
+    elif k == 3:
         asx[0] = -1/16 + ratx*( 1/24 + ratx*( 1/4 - ratx/6))  # noqa # fmt: skip
         asx[1] =  9/16 + ratx*( -9/8 + ratx*(-1/4 + ratx/2))  # noqa # fmt: skip
         asx[2] =  9/16 + ratx*(  9/8 + ratx*(-1/4 - ratx/2))  # noqa # fmt: skip
         asx[3] = -1/16 + ratx*(-1/24 + ratx*( 1/4 + ratx/6))  # noqa # fmt: skip
-        ix += o - 1
-        fout[mi] = 0.0
-        for i in range(4):
-            ixi = (ix + i) % n if p else ix + i
-            fout[mi] += f[ixi] * asx[i]
-
-
-@nb.njit(
-    nb.void(
-        nb.float64[:],  # f
-        nb.float64[:],  # xout
-        nb.float64[:],  # fout
-        nb.float64,  # a
-        nb.float64,  # h
-        nb.int64,  # n
-        nb.boolean,  # p
-        nb.int64,  # o
-        nb.float64,  # lb
-        nb.float64,  # ub
-    ),
-    fastmath=True,
-)
-def _interp1d_k5(f, xout, fout, a, h, n, p, o, lb, ub):
-    m = fout.shape[0]
-    for mi in nb.prange(m):
-        xr = min(max(xout[mi], lb), ub)
-        xx = xr - a
-        ix = _cell_index(xx, h, n, o, 5, p)
-        ratx = xx / h - (ix + 0.5)
-        asx = np.empty(6)
+    elif k == 5:
         asx[0] =   3/256 + ratx*(   -9/1920 + ratx*( -5/48/2 + ratx*(  1/8/6 + ratx*( 1/2/24 -  1/8/120*ratx))))  # noqa # fmt: skip # fmt: skip
         asx[1] = -25/256 + ratx*(  125/1920 + ratx*( 39/48/2 + ratx*(-13/8/6 + ratx*(-3/2/24 +  5/8/120*ratx))))  # noqa # fmt: skip
         asx[2] = 150/256 + ratx*(-2250/1920 + ratx*(-34/48/2 + ratx*( 34/8/6 + ratx*( 2/2/24 - 10/8/120*ratx))))  # noqa # fmt: skip
         asx[3] = 150/256 + ratx*( 2250/1920 + ratx*(-34/48/2 + ratx*(-34/8/6 + ratx*( 2/2/24 + 10/8/120*ratx))))  # noqa # fmt: skip
         asx[4] = -25/256 + ratx*( -125/1920 + ratx*( 39/48/2 + ratx*( 13/8/6 + ratx*(-3/2/24 -  5/8/120*ratx))))  # noqa # fmt: skip
         asx[5] =   3/256 + ratx*(    9/1920 + ratx*( -5/48/2 + ratx*( -1/8/6 + ratx*( 1/2/24 +  1/8/120*ratx))))  # noqa # fmt: skip
-        ix += o - 2
-        fout[mi] = 0.0
-        for i in range(6):
-            ixi = (ix + i) % n if p else ix + i
-            fout[mi] += f[ixi] * asx[i]
-
-
-@nb.njit(
-    nb.void(
-        nb.float64[:],  # f
-        nb.float64[:],  # xout
-        nb.float64[:],  # fout
-        nb.float64,  # a
-        nb.float64,  # h
-        nb.int64,  # n
-        nb.boolean,  # p
-        nb.int64,  # o
-        nb.float64,  # lb
-        nb.float64,  # ub
-    ),
-    fastmath=True,
-)
-def _interp1d_k7(f, xout, fout, a, h, n, p, o, lb, ub):  # pragma: no cover
-    m = fout.shape[0]
-    for mi in nb.prange(m):
-        xr = min(max(xout[mi], lb), ub)
-        xx = xr - a
-        ix = _cell_index(xx, h, n, o, 7, p)
-        ratx = xx / h - (ix + 0.5)
-        asx = np.empty(8)
+    elif k == 7:  # pragma: no cover
         asx[0] =   -5/2048 + ratx*(     75/107520 + ratx*(  259/11520/2 + ratx*(  -37/1920/6 + ratx*(  -7/48/24 + ratx*(   5/24/120 + ratx*( 1/2/720 -  1/5040*ratx))))))  # noqa # fmt: skip
         asx[1] =   49/2048 + ratx*(  -1029/107520 + ratx*(-2495/11520/2 + ratx*(  499/1920/6 + ratx*(  59/48/24 + ratx*( -59/24/120 + ratx*(-5/2/720 +  7/5040*ratx))))))  # noqa # fmt: skip
         asx[2] = -245/2048 + ratx*(   8575/107520 + ratx*(11691/11520/2 + ratx*(-3897/1920/6 + ratx*(-135/48/24 + ratx*( 225/24/120 + ratx*( 9/2/720 - 21/5040*ratx))))))  # noqa # fmt: skip
@@ -311,36 +206,7 @@ def _interp1d_k7(f, xout, fout, a, h, n, p, o, lb, ub):  # pragma: no cover
         asx[5] = -245/2048 + ratx*(  -8575/107520 + ratx*(11691/11520/2 + ratx*( 3897/1920/6 + ratx*(-135/48/24 + ratx*(-225/24/120 + ratx*( 9/2/720 + 21/5040*ratx))))))  # noqa # fmt: skip
         asx[6] =   49/2048 + ratx*(   1029/107520 + ratx*(-2495/11520/2 + ratx*( -499/1920/6 + ratx*(  59/48/24 + ratx*(  59/24/120 + ratx*(-5/2/720 -  7/5040*ratx))))))  # noqa # fmt: skip
         asx[7] =   -5/2048 + ratx*(    -75/107520 + ratx*(  259/11520/2 + ratx*(   37/1920/6 + ratx*(  -7/48/24 + ratx*(  -5/24/120 + ratx*( 1/2/720 +  1/5040*ratx))))))  # noqa # fmt: skip
-        ix += o - 3
-        fout[mi] = 0.0
-        for i in range(8):
-            ixi = (ix + i) % n if p else ix + i
-            fout[mi] += f[ixi] * asx[i]
-
-
-@nb.njit(
-    nb.void(
-        nb.float64[:],  # f
-        nb.float64[:],  # xout
-        nb.float64[:],  # fout
-        nb.float64,  # a
-        nb.float64,  # h
-        nb.int64,  # n
-        nb.boolean,  # p
-        nb.int64,  # o
-        nb.float64,  # lb
-        nb.float64,  # ub
-    ),
-    fastmath=True,
-)
-def _interp1d_k9(f, xout, fout, a, h, n, p, o, lb, ub):  # pragma: no cover
-    m = fout.shape[0]
-    for mi in nb.prange(m):
-        xr = min(max(xout[mi], lb), ub)
-        xx = xr - a
-        ix = _cell_index(xx, h, n, o, 9, p)
-        ratx = xx / h - (ix + 0.5)
-        asx = np.empty(10)
+    elif k == 9:  # pragma: no cover
         asx[0] =    35/65536 + ratx*(    -1225/10321920 + ratx*(  -3229/645120/2 + ratx*(    3229/967680/6 + ratx*(   141/3840/24 + ratx*(   -47/1152/120 + ratx*(  -3/16/720 + ratx*(    7/24/5040 + ratx*(  1/2/40320 -   1/362880*ratx))))))))  # noqa # fmt: skip
         asx[1] =  -405/65536 + ratx*(    18225/10321920 + ratx*(  37107/645120/2 + ratx*(  -47709/967680/6 + ratx*( -1547/3840/24 + ratx*(   663/1152/120 + ratx*(  29/16/720 + ratx*(  -87/24/5040 + ratx*( -7/2/40320 +   9/362880*ratx))))))))  # noqa # fmt: skip
         asx[2] =  2268/65536 + ratx*(  -142884/10321920 + ratx*(-204300/645120/2 + ratx*(  367740/967680/6 + ratx*(  7540/3840/24 + ratx*( -4524/1152/120 + ratx*(-100/16/720 + ratx*(  420/24/5040 + ratx*( 20/2/40320 -  36/362880*ratx))))))))  # noqa # fmt: skip
@@ -351,9 +217,60 @@ def _interp1d_k9(f, xout, fout, a, h, n, p, o, lb, ub):  # pragma: no cover
         asx[7] =  2268/65536 + ratx*(   142884/10321920 + ratx*(-204300/645120/2 + ratx*( -367740/967680/6 + ratx*(  7540/3840/24 + ratx*(  4524/1152/120 + ratx*(-100/16/720 + ratx*( -420/24/5040 + ratx*( 20/2/40320 +  36/362880*ratx))))))))  # noqa # fmt: skip
         asx[8] =  -405/65536 + ratx*(   -18225/10321920 + ratx*(  37107/645120/2 + ratx*(   47709/967680/6 + ratx*( -1547/3840/24 + ratx*(  -663/1152/120 + ratx*(  29/16/720 + ratx*(   87/24/5040 + ratx*( -7/2/40320 -   9/362880*ratx))))))))  # noqa # fmt: skip
         asx[9] =    35/65536 + ratx*(     1225/10321920 + ratx*(  -3229/645120/2 + ratx*(   -3229/967680/6 + ratx*(   141/3840/24 + ratx*(    47/1152/120 + ratx*(  -3/16/720 + ratx*(   -7/24/5040 + ratx*(  1/2/40320 +   1/362880*ratx))))))))  # noqa # fmt: skip
-        ix += o - 4
+
+
+@nb.njit(
+    nb.types.Tuple((nb.int64, nb.float64))(
+        nb.float64,  # x
+        nb.float64,  # a
+        nb.float64,  # h
+        nb.int64,  # n
+        nb.int64,  # k
+        nb.boolean,  # p
+        nb.int64,  # o
+        nb.float64,  # lb
+        nb.float64,  # ub
+    ),
+    fastmath=True,
+)
+def _locate(x, a, h, n, k, p, o, lb, ub):
+    """Cell of `x` clamped to `[lb, ub]`, and the position `ratx` in it.
+
+    Without periodicity, the cell is kept among those whose stencil lies
+    within the `o`-padded samples: at the clamping bounds, round-off in
+    `(x - a) / h` could otherwise select the cell one past the last.
+    """
+    xx = min(max(x, lb), ub) - a
+    ix = int(xx // h)
+    if not p:
+        ix = min(max(ix, k // 2 - o), n + o - k // 2 - 2)
+    return ix, xx / h - (ix + 0.5)
+
+
+@nb.njit(
+    nb.void(
+        nb.float64[:],  # f
+        nb.float64[:],  # xout
+        nb.float64[:],  # fout
+        nb.float64,  # a
+        nb.float64,  # h
+        nb.int64,  # n
+        nb.int64,  # k
+        nb.boolean,  # p
+        nb.int64,  # o
+        nb.float64,  # lb
+        nb.float64,  # ub
+    ),
+    fastmath=True,
+)
+def _interp1d(f, xout, fout, a, h, n, k, p, o, lb, ub):
+    asx = np.empty(k + 1)
+    for mi in range(fout.shape[0]):
+        ix, ratx = _locate(xout[mi], a, h, n, k, p, o, lb, ub)
+        stencil_weights(ratx, k, asx)
+        ix += o - k // 2
         fout[mi] = 0.0
-        for i in range(10):
+        for i in range(k + 1):
             ixi = (ix + i) % n if p else ix + i
             fout[mi] += f[ixi] * asx[i]
 
@@ -412,6 +329,50 @@ def _extrapolate1d_x(f, k, o):
         if k == 9:  # pragma: no cover
             f[il] = 10*f[il+1]-45*f[il+2]+120*f[il+3]-210*f[il+4]+252*f[il+5]-210*f[il+6]+120*f[il+7]-45*f[il+8]+10*f[il+9]-f[il+10]  # noqa # fmt: skip
             f[ih] = 10*f[ih-1]-45*f[ih-2]+120*f[ih-3]-210*f[ih-4]+252*f[ih-5]-210*f[ih-6]+120*f[ih-7]-45*f[ih-8]+10*f[ih-9]-f[ih-10]  # noqa # fmt: skip
+
+
+@nb.njit(
+    nb.float64[:](nb.int64),
+    fastmath=True,
+)
+def _extrapolation_coeffs(k):
+    """Coefficients of the ghost samples `_extrapolate1d_x` adds.
+
+    Each ghost sample is `sum_j c[j] * g[j]`, with `g[j]` the sample `j + 1`
+    steps inwards: the degree-`k` polynomial through the `k + 1` nearest
+    samples, extended one step, `c[j] = (-1)**j * binom(k + 1, j + 1)`.
+    """
+    c = np.empty(k + 1)
+    c[0] = k + 1.0
+    for j in range(1, k + 1):
+        c[j] = -c[j - 1] * (k + 1 - j) / (j + 1)
+    return c
+
+
+@nb.njit(
+    nb.float64[:](
+        nb.float64[:],
+        nb.int64,
+        nb.int64,
+    ),
+    fastmath=True,
+)
+def _extrapolate1d_adjoint(w, k, o):
+    """Transpose of the padding of `_extrapolate1d`.
+
+    Maps weights on the `o`-padded samples to weights on the samples, so
+    that `w @ fb == _extrapolate1d_adjoint(w, k, o) @ f` with `fb` the
+    padded `f`.
+    """
+    w = w.copy()
+    c = _extrapolation_coeffs(k)
+    for ix in range(o - 1, -1, -1):
+        il = o - ix - 1
+        ih = w.shape[0] - (o - ix)
+        for j in range(k + 1):
+            w[il + 1 + j] += c[j] * w[il]
+            w[ih - 1 - j] += c[j] * w[ih]
+    return w[o : w.shape[0] - o]
 
 
 @nb.njit(
@@ -527,90 +488,23 @@ class _nb_interp1d:
         self.xout = np.log(xout) if self.log_interp else xout
         self.out = np.empty(m, dtype=self.f.dtype)
 
-        if self.k == 1:
-            self._interp1d_k1()
-        elif self.k == 3:
-            self._interp1d_k3()
-        elif self.k == 5:
-            self._interp1d_k5()
-        elif self.k == 7:  # pragma: no cover
-            self._interp1d_k7()
-        elif self.k == 9:  # pragma: no cover
-            self._interp1d_k9()
-        else:
+        if self.k not in (1, 3, 5, 7, 9):
             raise ValueError(f"No interpolation for k={self.k}")
+        _interp1d(
+            self._f,
+            self.xout,
+            self.out,
+            self.a,
+            self.h,
+            self.n,
+            self.k,
+            self.p,
+            self._o,
+            self.lb,
+            self.ub,
+        )
 
         return self.out
-
-    def _interp1d_k1(self):
-        _interp1d_k1(
-            self._f,
-            self.xout,
-            self.out,
-            self.a,
-            self.h,
-            self.n,
-            self.p,
-            self._o,
-            self.lb,
-            self.ub,
-        )
-
-    def _interp1d_k3(self):
-        _interp1d_k3(
-            self._f,
-            self.xout,
-            self.out,
-            self.a,
-            self.h,
-            self.n,
-            self.p,
-            self._o,
-            self.lb,
-            self.ub,
-        )
-
-    def _interp1d_k5(self):
-        _interp1d_k5(
-            self._f,
-            self.xout,
-            self.out,
-            self.a,
-            self.h,
-            self.n,
-            self.p,
-            self._o,
-            self.lb,
-            self.ub,
-        )
-
-    def _interp1d_k7(self):  # pragma: no cover
-        _interp1d_k7(
-            self._f,
-            self.xout,
-            self.out,
-            self.a,
-            self.h,
-            self.n,
-            self.p,
-            self._o,
-            self.lb,
-            self.ub,
-        )
-
-    def _interp1d_k9(self):  # pragma: no cover
-        _interp1d_k9(
-            self._f,
-            self.xout,
-            self.out,
-            self.a,
-            self.h,
-            self.n,
-            self.p,
-            self._o,
-            self.lb,
-            self.ub,
-        )
 
 
 # We jit the class as it could be useful to have access to the ortiginal python
@@ -710,16 +604,7 @@ def nb_interp1d_func(
 
     out = np.empty(m, dtype=np.float64)
 
-    if k == 1:
-        _interp1d_k1(_f, xout, out, a, h, n, p, _o, lb, ub)
-    elif k == 3:
-        _interp1d_k3(_f, xout, out, a, h, n, p, _o, lb, ub)
-    elif k == 5:
-        _interp1d_k5(_f, xout, out, a, h, n, p, _o, lb, ub)
-    elif k == 7:  # pragma: no cover
-        _interp1d_k7(_f, xout, out, a, h, n, p, _o, lb, ub)
-    elif k == 9:  # pragma: no cover
-        _interp1d_k9(_f, xout, out, a, h, n, p, _o, lb, ub)
+    _interp1d(_f, xout, out, a, h, n, k, p, _o, lb, ub)
 
     return out[0]
 
