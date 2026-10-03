@@ -261,3 +261,58 @@ def test_pure_eb_linearity():
     assert np.all(residual < 1e-6), (
         f"max |T(xi+n) + T(xi-n) - 2T(xi)| / sigma per output: {report}"
     )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="K_p evaluates H_m(t, t_int) where Schneider et al. 2022 Eq. 51 "
+    "has H_m(t_int, t), which leaks pure-E xi_+ into the xi_- B mode",
+)
+def test_pure_eb_no_leakage_narrow_window():
+    """
+    Test that pure-E input gives no B modes on a narrow, unpadded window.
+
+    xi_+ is a Gaussian, exp(-x) with x = theta^2 / (2 S^2), and xi_- is its
+    pure-E partner,
+
+        xi_-(t) = xi_+(t) + int_0^t dp p / t^2 xi_+(p) (4 - 12 p^2 / t^2),
+
+    which has the closed form
+
+        xi_- = exp(-x) + 2 (1 - exp(-x)) / x
+               - 6 (1 - (1 + x) exp(-x)) / x^2.
+
+    With pad_xim=False the xi_- B mode depends on the xi_+ -> xi_- kernel
+    K_+ (Eq. 51) over the whole window, so this checks its argument order.
+    """
+    S = 20.0
+    tmin, tmax = 12.0, 83.0
+
+    def xipm(theta):
+        x = theta**2 / (2 * S**2)
+        e = np.exp(-x)
+        xim = e + 2 * (1 - e) / x - 6 * (1 - (1 + x) * e) / x**2
+        return e, xim
+
+    log_edges = np.linspace(np.log(tmin), np.log(tmax), 401)
+    theta_int = np.exp(0.5 * (log_edges[:-1] + log_edges[1:]))
+    theta = np.geomspace(15.0, 70.0, 6)
+
+    xip, xim = xipm(theta)
+    xip_int, xim_int = xipm(theta_int)
+    modes = get_pure_EB_modes(
+        theta,
+        xip,
+        xim,
+        theta_int,
+        xip_int,
+        xim_int,
+        tmin,
+        tmax,
+        parallel=False,
+        pad_xim=False,
+    )
+
+    # Peak |xi_+| is 1: B modes are leakage relative to the signal.
+    assert_allclose(modes[2], 0, atol=1e-6)
+    assert_allclose(modes[3], 0, atol=1e-6)
