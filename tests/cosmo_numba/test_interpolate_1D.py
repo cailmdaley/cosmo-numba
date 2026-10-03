@@ -513,15 +513,7 @@ class TestNbInterp1D:
         [
             1,
             3,
-            pytest.param(
-                5,
-                marks=pytest.mark.xfail(
-                    strict=True,
-                    reason="the r^5 coefficients of the k=5 stencil are "
-                    "written c/8/120 where Lagrange interpolation needs "
-                    "c/120, so it reproduces polynomials only to degree 4",
-                ),
-            ),
+            5,
             7,
             9,
         ],
