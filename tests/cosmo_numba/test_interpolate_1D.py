@@ -507,3 +507,34 @@ class TestNbInterp1D:
 
         with pytest.raises(ValueError):
             interp_class.eval(xi)
+
+    @pytest.mark.parametrize(
+        "k",
+        [
+            1,
+            3,
+            pytest.param(
+                5,
+                marks=pytest.mark.xfail(
+                    strict=True,
+                    reason="the r^5 coefficients of the k=5 stencil are "
+                    "written c/8/120 where Lagrange interpolation needs "
+                    "c/120, so it reproduces polynomials only to degree 4",
+                ),
+            ),
+            7,
+            9,
+        ],
+    )
+    def test_polynomial_exactness_coarse_grid(self, k):
+        """
+        The order-k interpolant reproduces a polynomial of degree k between
+        the samples, also on a grid coarse enough that a wrong top-degree
+        coefficient is not hidden by a small h^k.
+        """
+        x = np.linspace(-1.0, 1.0, 17)
+        poly = np.polynomial.Polynomial(np.ones(k + 1))
+        interp = nb_interp1d(x[0], x[-1], x[1] - x[0], poly(x), k=k)
+
+        x_eval = np.linspace(-0.45, 0.45, 40)
+        assert_allclose(interp.eval(x_eval), poly(x_eval), rtol=0, atol=1e-10)
