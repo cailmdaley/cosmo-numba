@@ -539,12 +539,6 @@ class TestNbInterp1D:
         x_eval = np.linspace(-0.45, 0.45, 40)
         assert_allclose(interp.eval(x_eval), poly(x_eval), rtol=0, atol=1e-10)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the cell index is not clamped, so between the last padded "
-        "cell and the upper clamping bound the stencil reads past the padded "
-        "samples whenever b exceeds a + (n - 1) h, by design or by round-off",
-    )
     @pytest.mark.parametrize("k", [1, 3, 5, 7, 9])
     def test_upper_clamp_stays_in_data(self, k):
         """

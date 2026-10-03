@@ -158,6 +158,27 @@ AkimaInterp1D = nb.experimental.jitclass(spec_akima)(_AkimaInterp1D)
 
 
 @nb.njit(
+    nb.int64(
+        nb.float64,
+        nb.float64,
+        nb.int64,
+        nb.int64,
+        nb.int64,
+        nb.boolean,
+    ),
+    fastmath=True,
+)
+def _cell_index(xx, h, n, o, k, p):
+    """Cell of `xx` (offset from the grid start), kept inside the padded
+    data: at the clamping bounds, round-off in `xx / h` can otherwise point
+    one cell beyond the array."""
+    ix = int(xx // h)
+    if p:
+        return ix
+    return min(max(ix, k // 2 - o), n + o - k // 2 - 2)
+
+
+@nb.njit(
     nb.void(
         nb.float64[:],  # f
         nb.float64[:],  # xout
@@ -177,7 +198,7 @@ def _interp1d_k1(f, xout, fout, a, h, n, p, o, lb, ub):
     for mi in nb.prange(m):
         xr = min(max(xout[mi], lb), ub)
         xx = xr - a
-        ix = int(xx // h)
+        ix = _cell_index(xx, h, n, o, 1, p)
         ratx = xx / h - (ix + 0.5)
         asx = np.empty(2)
         asx[0] = 0.5 - ratx
@@ -209,7 +230,7 @@ def _interp1d_k3(f, xout, fout, a, h, n, p, o, lb, ub):
     for mi in nb.prange(m):
         xr = min(max(xout[mi], lb), ub)
         xx = xr - a
-        ix = int(xx // h)
+        ix = _cell_index(xx, h, n, o, 3, p)
         ratx = xx / h - (ix + 0.5)
         asx = np.empty(4)
         asx[0] = -1/16 + ratx*( 1/24 + ratx*( 1/4 - ratx/6))  # noqa # fmt: skip
@@ -243,7 +264,7 @@ def _interp1d_k5(f, xout, fout, a, h, n, p, o, lb, ub):
     for mi in nb.prange(m):
         xr = min(max(xout[mi], lb), ub)
         xx = xr - a
-        ix = int(xx // h)
+        ix = _cell_index(xx, h, n, o, 5, p)
         ratx = xx / h - (ix + 0.5)
         asx = np.empty(6)
         asx[0] =   3/256 + ratx*(   -9/1920 + ratx*( -5/48/2 + ratx*(  1/8/6 + ratx*( 1/2/24 -  1/8/120*ratx))))  # noqa # fmt: skip # fmt: skip
@@ -279,7 +300,7 @@ def _interp1d_k7(f, xout, fout, a, h, n, p, o, lb, ub):  # pragma: no cover
     for mi in nb.prange(m):
         xr = min(max(xout[mi], lb), ub)
         xx = xr - a
-        ix = int(xx // h)
+        ix = _cell_index(xx, h, n, o, 7, p)
         ratx = xx / h - (ix + 0.5)
         asx = np.empty(8)
         asx[0] =   -5/2048 + ratx*(     75/107520 + ratx*(  259/11520/2 + ratx*(  -37/1920/6 + ratx*(  -7/48/24 + ratx*(   5/24/120 + ratx*( 1/2/720 -  1/5040*ratx))))))  # noqa # fmt: skip
@@ -317,7 +338,7 @@ def _interp1d_k9(f, xout, fout, a, h, n, p, o, lb, ub):  # pragma: no cover
     for mi in nb.prange(m):
         xr = min(max(xout[mi], lb), ub)
         xx = xr - a
-        ix = int(xx // h)
+        ix = _cell_index(xx, h, n, o, 9, p)
         ratx = xx / h - (ix + 0.5)
         asx = np.empty(10)
         asx[0] =    35/65536 + ratx*(    -1225/10321920 + ratx*(  -3229/645120/2 + ratx*(    3229/967680/6 + ratx*(   141/3840/24 + ratx*(   -47/1152/120 + ratx*(  -3/16/720 + ratx*(    7/24/5040 + ratx*(  1/2/40320 -   1/362880*ratx))))))))  # noqa # fmt: skip
