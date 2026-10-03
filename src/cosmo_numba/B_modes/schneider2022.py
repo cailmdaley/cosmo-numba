@@ -15,6 +15,7 @@ from .schneider2022_nb import (
 )
 from .schneider2022_operator import (
     PURE_EB_OUTPUTS,
+    _apply,
     get_pure_EB_covariance,
     get_pure_EB_operator,
 )
@@ -58,7 +59,9 @@ def get_pure_EB_modes(
     in the inputs, and the same matrices propagate a covariance of the inputs
     (`get_pure_EB_covariance`). Where the support of a theta-dependent
     integral holds 1 to `interp_order` nodes of `theta_int`, the outputs at
-    that theta are NaN. `parallel`, `epsabs` and `epsrel` are not used.
+    that theta are NaN. A NaN or inf input makes NaN only the outputs whose
+    integrals or local terms use it. `parallel`, `epsabs` and `epsrel` are
+    not used.
 
     With `quadrature="adaptive"`, the interpolant is integrated by QUADPACK's
     adaptive `dqags` to the tolerances `epsabs`, `epsrel`, serially or in
@@ -118,7 +121,7 @@ def get_pure_EB_modes(
             interp_order=interp_order,
         )
         data = np.concatenate([xip, xim, xip_int, xim_int])
-        return tuple(op @ data for op in ops)
+        return tuple(_apply(op, data) for op in ops)
     elif quadrature != "adaptive":
         raise ValueError(
             f"quadrature must be 'adaptive' or 'fixed', got {quadrature!r}"

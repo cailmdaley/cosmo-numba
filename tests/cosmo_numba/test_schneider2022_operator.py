@@ -280,6 +280,60 @@ def test_edge_policy(ccl):
     assert np.all(np.isfinite(out[4])) and np.all(np.isfinite(out[5]))
 
 
+def _with_nan(args, slot, frac):
+    """`args` with a NaN at fraction `frac` of the array in `args[slot]`."""
+    args = list(args)
+    v = np.array(args[slot], dtype=np.float64)
+    v[int(frac * (v.size - 1))] = np.nan
+    args[slot] = v
+    return args
+
+
+@pytest.mark.parametrize(
+    "slot, frac, same_as_adaptive",
+    [(1, 0.35, True), (2, 0.6, True), (5, 0.5, True), (4, 0.85, False)],
+    ids=["xip", "xim", "xim_int", "xip_int beyond tmax"],
+)
+def test_nan_is_local(ccl, slot, frac, same_as_adaptive):
+    """
+    A NaN input sample makes NaN only the outputs whose integrals or local
+    terms use it; the others are unchanged. The adaptive path gives NaN in
+    the same outputs, except where the sample's contribution is below its
+    tolerance and dqags never evaluates the interpolant near it: beyond
+    tmax, xip_int enters the padded xim window with a weight that falls
+    below epsabs at large theta.
+    """
+    clean = _geometry("two grids", ccl)
+    args = _with_nan(clean, slot, frac)
+    fixed = np.array(get_pure_EB_modes(*args, quadrature="fixed"))
+    adaptive = np.array(get_pure_EB_modes(*args, quadrature="adaptive"))
+    nan = np.isnan(fixed)
+    assert nan.any() and not nan.all()
+    adaptive_nan = ~np.isfinite(adaptive)
+    if same_as_adaptive:
+        np.testing.assert_array_equal(nan, adaptive_nan)
+    else:
+        assert np.all(nan[adaptive_nan]) and (nan & ~adaptive_nan).any()
+    ref = np.array(get_pure_EB_modes(*clean, quadrature="fixed"))
+    assert_allclose(fixed[~nan], ref[~nan], rtol=1e-13, atol=0)
+
+
+def test_nan_keeps_undersupported(ccl):
+    """
+    A NaN in a local term adds NaN at its theta and keeps the NaN of the
+    under-supported outputs.
+    """
+    clean = _geometry("single grid", ccl)
+    ref = np.array(get_pure_EB_modes(*clean, quadrature="fixed"))
+    j = int(0.5 * (clean[0].size - 1))
+    out = np.array(
+        get_pure_EB_modes(*_with_nan(clean, 1, 0.5), quadrature="fixed")
+    )
+    expected = np.isnan(ref)
+    expected[:4, j] = True
+    np.testing.assert_array_equal(np.isnan(out), expected)
+
+
 def test_unknown_quadrature(ccl):
     """Only 'adaptive' and 'fixed' are accepted."""
     args = _geometry("two grids", ccl)

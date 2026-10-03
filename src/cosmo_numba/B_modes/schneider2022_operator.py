@@ -217,6 +217,22 @@ def get_pure_EB_operator(
     return tuple(ops)
 
 
+def _apply(op, x):
+    """`op @ x`, with each non-finite entry of `x` spoiling only its rows.
+
+    A dense product spreads one NaN or inf in `x` to every output. Here the
+    product is taken with non-finite entries zeroed, and the outputs are NaN
+    exactly where the row has a nonzero weight on a non-finite entry. Rows
+    that are already NaN (under-supported integrals) stay NaN.
+    """
+    bad = ~np.isfinite(x)
+    if not bad.any():
+        return op @ x
+    out = op @ np.where(bad, 0.0, x)
+    out[(op != 0) @ bad] = np.nan
+    return out
+
+
 def get_pure_EB_covariance(
     operator, cov, outputs=("xip_E", "xim_E", "xip_B", "xim_B")
 ):
