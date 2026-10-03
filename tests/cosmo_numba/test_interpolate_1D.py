@@ -10,8 +10,13 @@ from numpy.testing import assert_allclose
 
 from cosmo_numba.math.interpolate.interpolate_1D import (
     AkimaInterp1D,
+    _compute_bounds1,
+    _extrapolate1d,
+    _extrapolate1d_adjoint,
+    _locate,
     nb_interp1d,
     nb_interp1d_func,
+    stencil_weights,
 )
 
 
@@ -555,3 +560,50 @@ class TestNbInterp1D:
         x_eval = x[-1] + h * np.array([0.5, 1.1, 1.3, 1.45, 3.0])
         expected = 0.3 + 1.7 * np.minimum(x_eval, b + e * h)
         assert_allclose(interp.eval(x_eval), expected, rtol=0, atol=1e-11)
+
+    # ================================================================
+    # Stencil weights
+    # ================================================================
+
+    @pytest.mark.parametrize("k", [1, 3, 5, 7, 9])
+    @pytest.mark.parametrize("e", [0, 1, 2])
+    def test_stencil_weights_match_eval(self, k, e):
+        """
+        The interpolant is a fixed linear map of the samples: the stencil
+        weights at the located cell, folded back from the padded samples by
+        `_extrapolate1d_adjoint`, give the value `nb_interp1d` returns, inside
+        the grid, in the extrapolated cells and beyond the clamping bounds.
+        """
+        n, a, h = 40, 0.3, 0.1
+        b = a + (n - 1) * h
+        f = np.random.default_rng(k + 10 * e).standard_normal(n)
+        xout = np.concatenate(
+            [np.linspace(a - 1.0, b + 1.0, 301), [a - e * h, b + e * h]]
+        )
+        o = k // 2 + e
+        lb, ub = _compute_bounds1(a, b, h, False, True, e, k)
+        asx = np.empty(k + 1)
+        w = np.zeros((xout.size, n + 2 * o))
+        for m, x in enumerate(xout):
+            ix, ratx = _locate(x, a, h, n, k, False, o, lb, ub)
+            stencil_weights(ratx, k, asx)
+            i0 = ix + o - k // 2
+            w[m, i0 : i0 + k + 1] = asx
+        weights = np.array([_extrapolate1d_adjoint(row, k, o) for row in w])
+
+        interp = nb_interp1d(a, b, h, f, k, False, True, e, False)
+        assert_allclose(weights @ f, interp.eval(xout), rtol=1e-12, atol=1e-11)
+
+    @pytest.mark.parametrize("k", [1, 3, 5, 7, 9])
+    @pytest.mark.parametrize("e", [0, 1, 2])
+    def test_extrapolate_adjoint(self, k, e):
+        """
+        `_extrapolate1d_adjoint` is the transpose of the padding.
+        """
+        rng = np.random.default_rng(10 * k + e)
+        f = rng.standard_normal(30)
+        fb, o = _extrapolate1d(f, k, False, True, e)
+        w = rng.standard_normal(fb.size)
+        scale = np.abs(w) @ np.abs(fb)
+        wf = _extrapolate1d_adjoint(w, k, o) @ f
+        assert_allclose(wf, w @ fb, rtol=0, atol=1e-14 * scale)
