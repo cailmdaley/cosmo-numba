@@ -538,3 +538,26 @@ class TestNbInterp1D:
 
         x_eval = np.linspace(-0.45, 0.45, 40)
         assert_allclose(interp.eval(x_eval), poly(x_eval), rtol=0, atol=1e-10)
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="the cell index is not clamped, so between the last padded "
+        "cell and the upper clamping bound the stencil reads past the padded "
+        "samples whenever b exceeds a + (n - 1) h, by design or by round-off",
+    )
+    @pytest.mark.parametrize("k", [1, 3, 5, 7, 9])
+    def test_upper_clamp_stays_in_data(self, k):
+        """
+        Up to the upper clamping bound b + e h, the interpolant is built from
+        the padded samples also when b lies past the last sample, as for a
+        sub-grid of an irregular grid with its mean step: a line is
+        reproduced there, and held at the bound beyond it.
+        """
+        n, h, e = 30, 0.1, 1
+        x = np.arange(n) * h
+        b = x[-1] + 0.5 * h
+        interp = nb_interp1d(x[0], b, h, 0.3 + 1.7 * x, k, False, True, e)
+
+        x_eval = x[-1] + h * np.array([0.5, 1.1, 1.3, 1.45, 3.0])
+        expected = 0.3 + 1.7 * np.minimum(x_eval, b + e * h)
+        assert_allclose(interp.eval(x_eval), expected, rtol=0, atol=1e-11)
