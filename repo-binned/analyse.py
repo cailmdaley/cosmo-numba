@@ -1,6 +1,6 @@
 """Figure + numbers from cache/adapt_*.npz (run.py). Fixed arm = M' x on the same z.
 
-    PYTHONPATH=../issue23-repo/src python3.12 analyse.py
+    PYTHONPATH=<cosmo-numba checkout of cailmdaley/cosmo-numba#7>/src python3.12 analyse.py
 """
 import glob
 import re

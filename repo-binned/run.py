@@ -1,7 +1,7 @@
 """dqags non-linearity of the pure E/B transform with the repo's own test data, used
 the way the pipeline uses it: local xi_pm bin-averaged into 20 reporting bins.
 
-Data (issue23-repo/data = cosmo-numba tests/cosmo_numba/data): CCL xi_pm interpolated
+Data (cosmo-numba tests/cosmo_numba/data): CCL xi_pm interpolated
 in ln theta onto theta_int = midpoints of logspace(0.5, 250, 1001); LSST CosmoCov cov C.
 Reporting bins: edges logspace(0, log10 250, 21); B row b = weights w_i ∝ theta_i^2 dln(theta_i)
 (pair-count proxy) over fine nodes in bin b, normalised; theta_b = weighted mean theta.
@@ -10,8 +10,8 @@ pad_xim=True, interp_order=5). Adaptive arm = quadrature="adaptive" (dqags);
 fixed arm = M' x with M' = M J, M = get_pure_EB_operator(..., local_from_int=False).
 Draws x = xi + alpha L z, z from default_rng([SEED, c]) per chunk c (common random numbers).
 
-    PYTHONPATH=../issue23-repo/src python3.12 run.py check
-    PYTHONPATH=../issue23-repo/src python3.12 run.py chunk ALPHA C0 C1 NPROC
+    PYTHONPATH=<cosmo-numba checkout of cailmdaley/cosmo-numba#7>/src python3.12 run.py check
+    PYTHONPATH=<cosmo-numba checkout of cailmdaley/cosmo-numba#7>/src python3.12 run.py chunk ALPHA C0 C1 NPROC
 """
 import multiprocessing as mp
 import os
@@ -23,7 +23,7 @@ import numpy as np
 from cosmo_numba.B_modes.schneider2022 import get_pure_EB_modes, get_pure_EB_operator
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DATA = f"{HERE}/../issue23-repo/data"
+DATA = os.environ.get("CN_DATA", "tests/cosmo_numba/data")
 SEED = 23
 NCH = 500
 
